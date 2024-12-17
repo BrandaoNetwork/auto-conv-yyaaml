@@ -4,10 +4,10 @@ on:
   workflow_dispatch: # Permite execução manual com entradas
     inputs:
       source_repo: 
-        description: 'URL do repositório de origem (Bitbucket)'
+        description: 'Caminho do repositório de origem no Bitbucket (ex: brandaonetwork1/conv-yaml-out.git)'
         required: true
       destination_repo:
-        description: 'URL do repositório de destino (GitHub)'
+        description: 'URL do repositório de destino no GitHub'
         required: true
 
 jobs:
@@ -28,8 +28,8 @@ jobs:
       # Clonar o repositório de origem (Bitbucket)
       - name: Clone Source Repository
         run: |
-          echo "Cloning Source Repository: $SOURCE_REPO"
-          git clone https://$BITBUCKET_USER:$BITBUCKET_PASSWORD@$SOURCE_REPO cloned-repo
+          echo "Cloning Source Repository..."
+          git clone https://${BITBUCKET_USER}:${BITBUCKET_PASSWORD}@bitbucket.org/${SOURCE_REPO} cloned-repo
 
       # Listar arquivos clonados
       - name: List Files in Cloned Repo
@@ -37,7 +37,7 @@ jobs:
           echo "Files in cloned repository:"
           ls -la cloned-repo
 
-      # Converter o manifesto usando API do OpenAI
+      # Converter o manifesto usando a API do OpenAI
       - name: Convert Manifest with OpenAI API
         run: |
           cd cloned-repo
