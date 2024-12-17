@@ -1,6 +1,5 @@
 name: Convert Bitbucket CI to Azure DevOps Pipeline
 
-# Este workflow é acionado manualmente via Actions no GitHub
 on:
   workflow_dispatch:
     inputs:
@@ -8,46 +7,42 @@ on:
         description: 'Caminho do repositório Bitbucket (ex: brandaonetwork1/conv-yaml-out.git)'
         required: true
       destination_repo:
-        description: 'Repositório de destino no GitHub (ex: BrandaoNetwork/conv-yaml-in)'
+        description: 'URL do repositório de destino no GitHub'
         required: true
 
 jobs:
   convert_pipeline:
     runs-on: ubuntu-latest
-
-    # Configura variáveis de ambiente
     env:
-      BITBUCKET_USER: ${{ secrets.BITBUCKET_USERNAME }}          # Usuário Bitbucket
-      BITBUCKET_PASSWORD: ${{ secrets.BITBUCKET_PASSWORD }}      # Token/Senha Bitbucket
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}              # Chave de API OpenAI
-      SOURCE_REPO: ${{ github.event.inputs.source_repo }}        # Repositório Bitbucket
-      DESTINATION_REPO: ${{ github.event.inputs.destination_repo }} # Repositório GitHub destino
+      BITBUCKET_USER: ${{ secrets.BITBUCKET_USERNAME }}
+      BITBUCKET_PASSWORD: ${{ secrets.BITBUCKET_PASSWORD }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      SOURCE_REPO: ${{ github.event.inputs.source_repo }}
+      DESTINATION_REPO: ${{ github.event.inputs.destination_repo }}
 
     steps:
-      # 1. Checkout do repositório atual no GitHub (onde a action está sendo executada)
+      # Checkout do repositório atual
       - name: Checkout GitHub Repository
         uses: actions/checkout@v3
 
-      # 2. Clone do repositório do Bitbucket usando credenciais seguras
-      - name: Clone Source Repository from Bitbucket
+      # Clonar o repositório do Bitbucket
+      - name: Clone Bitbucket Repository
         run: |
-          echo "Cloning Bitbucket repository: $SOURCE_REPO"
+          echo "Cloning Source Repository: $SOURCE_REPO"
           git clone https://${BITBUCKET_USER}:${BITBUCKET_PASSWORD}@bitbucket.org/${SOURCE_REPO} cloned-repo
 
-      # 3. Listar arquivos do repositório clonado para verificação
-      - name: List Files in Cloned Repository
+      # Listar arquivos clonados
+      - name: List Files in Cloned Repo
         run: |
           echo "Files in cloned repository:"
           ls -la cloned-repo
 
-      # 4. Converter o manifesto bitbucket-pipelines.yml usando a API OpenAI
+      # Converter o manifesto com OpenAI API
       - name: Convert Manifest with OpenAI API
         run: |
           cd cloned-repo
           if [ -f bitbucket-pipelines.yml ]; then
-            echo "Converting Bitbucket CI Manifest to Azure DevOps Pipeline..."
-
-            # Lê o arquivo YAML e envia para a API OpenAI
+            echo "Converting manifest..."
             BITBUCKET_CONTENT=$(cat bitbucket-pipelines.yml | sed 's/"/\\"/g' | tr '\n' ' ')
             RESPONSE=$(curl -s -X POST https://api.openai.com/v1/chat/completions \
               -H "Authorization: Bearer $OPENAI_API_KEY" \
@@ -60,40 +55,16 @@ jobs:
                 ]
               }')
 
-            # Salva o conteúdo convertido em um novo arquivo
             echo $RESPONSE | jq -r '.choices[0].message.content' > azure-pipeline-converted.yml
-            echo "Conversion complete: azure-pipeline-converted.yml created."
+            echo "Conversion complete."
           else
-            echo "No bitbucket-pipelines.yml found in repository."
+            echo "No bitbucket-pipelines.yml found."
             exit 1
           fi
 
-      # 5. Publicar o arquivo convertido como artefato no GitHub Actions
-      - name: Upload Converted Manifest as Artifact
+      # Upload do arquivo convertido como artefato
+      - name: Upload Converted Pipeline
         uses: actions/upload-artifact@v3
         with:
-          name: azure-pipeline-converted
+          name: converted-azure-pipeline
           path: cloned-repo/azure-pipeline-converted.yml
-
-      # 6. Enviar o arquivo convertido para o repositório de destino no GitHub
-      - name: Push Converted Manifest to Destination Repository
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Token padrão fornecido pelo GitHub Actions
-        run: |
-          echo "Pushing Converted Manifest to Destination Repository: $DESTINATION_REPO"
-
-          # Configura o usuário Git para commits
-          git config --global user.name "github-actions"
-          git config --global user.email "actions@github.com"
-
-          # Clona o repositório de destino
-          git clone https://x-access-token:${GITHUB_TOKEN}@github.com/${DESTINATION_REPO}.git destination-repo
-
-          # Copia o arquivo convertido para o repositório de destino
-          cp cloned-repo/azure-pipeline-converted.yml destination-repo/
-
-          # Realiza commit e push do arquivo convertido
-          cd destination-repo
-          git add azure-pipeline-converted.yml
-          git commit -m "Add converted Azure DevOps pipeline manifest"
-          git push origin main
