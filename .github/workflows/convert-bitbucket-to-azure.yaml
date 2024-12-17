@@ -1,0 +1,87 @@
+name: Convert Bitbucket CI to Azure DevOps Pipeline
+
+on:
+  workflow_dispatch: # Permite execução manual com entradas
+    inputs:
+      source_repo: 
+        description: 'URL do repositório de origem (Bitbucket)'
+        required: true
+      destination_repo:
+        description: 'URL do repositório de destino (GitHub)'
+        required: true
+
+jobs:
+  convert_pipeline:
+    runs-on: ubuntu-latest
+    env:
+      BITBUCKET_USER: ${{ secrets.BITBUCKET_USERNAME }}
+      BITBUCKET_PASSWORD: ${{ secrets.BITBUCKET_PASSWORD }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      SOURCE_REPO: ${{ github.event.inputs.source_repo }}
+      DESTINATION_REPO: ${{ github.event.inputs.destination_repo }}
+
+    steps:
+      # Checkout do repositório atual do GitHub
+      - name: Checkout GitHub Repository
+        uses: actions/checkout@v3
+
+      # Clonar o repositório de origem (Bitbucket)
+      - name: Clone Source Repository
+        run: |
+          echo "Cloning Source Repository: $SOURCE_REPO"
+          git clone https://$BITBUCKET_USER:$BITBUCKET_PASSWORD@$SOURCE_REPO cloned-repo
+
+      # Listar arquivos clonados
+      - name: List Files in Cloned Repo
+        run: |
+          echo "Files in cloned repository:"
+          ls -la cloned-repo
+
+      # Converter o manifesto usando API do OpenAI
+      - name: Convert Manifest with OpenAI API
+        run: |
+          cd cloned-repo
+          if [ -f bitbucket-pipelines.yml ]; then
+            echo "Sending Bitbucket CI Manifest to OpenAI API..."
+            BITBUCKET_CONTENT=$(cat bitbucket-pipelines.yml | sed 's/"/\\"/g' | tr '\n' ' ')
+            
+            RESPONSE=$(curl -s -X POST https://api.openai.com/v1/chat/completions \
+              -H "Authorization: Bearer $OPENAI_API_KEY" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "model": "gpt-4",
+                "messages": [
+                  {"role": "system", "content": "You are a YAML conversion expert. Convert Bitbucket CI manifests to Azure DevOps pipeline manifests."},
+                  {"role": "user", "content": "Convert the following Bitbucket CI pipeline YAML to Azure DevOps pipeline YAML:\n'"$BITBUCKET_CONTENT"'"}
+                ],
+                "temperature": 0.7
+              }')
+
+            echo $RESPONSE | jq -r '.choices[0].message.content' > azure-pipeline-converted.yml
+            echo "Conversion complete. Saved as azure-pipeline-converted.yml"
+          else
+            echo "No bitbucket-pipelines.yml found in repository."
+            exit 1
+          fi
+
+      # Subir o arquivo convertido no repositório de destino (GitHub)
+      - name: Push Converted Manifest to Destination Repo
+        run: |
+          echo "Pushing Converted Manifest to Destination Repository: $DESTINATION_REPO"
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+
+          mkdir destination-repo
+          cd destination-repo
+          git clone $DESTINATION_REPO .
+          cp ../cloned-repo/azure-pipeline-converted.yml .
+          git add azure-pipeline-converted.yml
+          git commit -m "Add converted Azure DevOps pipeline manifest"
+          git push origin main
+
+      # Upload do arquivo convertido como artefato
+      - name: Upload Converted Pipeline as Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: converted-azure-pipeline
+          path: cloned-repo/azure-pipeline-converted.yml
